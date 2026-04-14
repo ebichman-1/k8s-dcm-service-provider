@@ -14,6 +14,8 @@ GOOS := $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 CGO_ENABLED := 0
 
+CONTAINER_ENGINE ?= $(shell which podman 2>/dev/null || which docker)
+
 # Container variables
 IMAGE_NAME := $(APP_NAME)
 IMAGE_TAG := $(VERSION)
@@ -184,14 +186,14 @@ docs-serve: ## Serve API documentation
 .PHONY: image-build
 image-build: ## Build container image
 	@echo "Building container image..."
-	@podman build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	${CONTAINER_ENGINE} build -t $(IMAGE_NAME):$(IMAGE_TAG) .
 	@echo "Container image built: $(IMAGE_NAME):$(IMAGE_TAG)"
 
 .PHONY: image-run
 image-run: ## Run container
 	@echo "Running container..."
 	@echo "Using kubeconfig: $(if $(KUBECONFIG),$(KUBECONFIG),~/.kube/config)"
-	@podman run -d --rm --name $(CONTAINER_NAME) -p 8082:8080 -p 8083:8081 \
+	${CONTAINER_ENGINE} run -d --rm --name $(CONTAINER_NAME) -p 8082:8080 -p 8083:8081 \
 		$(if $(DCM_NETWORK),--network $(DCM_NETWORK),) \
 		-v "$(if $(KUBECONFIG),$(KUBECONFIG),~/.kube/config)":/home/appuser/.kube/config:ro \
 		$(IMAGE_NAME):$(IMAGE_TAG)
@@ -199,7 +201,7 @@ image-run: ## Run container
 .PHONY: image-stop
 image-stop: ## Stop container
 	@echo "Stopping container..."
-	@podman stop $(CONTAINER_NAME)
+	${CONTAINER_ENGINE} stop $(CONTAINER_NAME)
 
 
 ##@ Release
