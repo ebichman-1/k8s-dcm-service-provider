@@ -16,6 +16,10 @@ CGO_ENABLED := 0
 
 CONTAINER_ENGINE ?= $(shell which podman 2>/dev/null || which docker)
 
+ifndef CONTAINER_ENGINE
+  $(error No container engine found. Install podman or docker, or set CONTAINER_ENGINE explicitly)
+endif
+
 # Container variables
 IMAGE_NAME := $(APP_NAME)
 IMAGE_TAG := $(VERSION)
@@ -183,23 +187,33 @@ docs-serve: ## Serve API documentation
 	fi
 
 ##@ Container
+.PHONY: check-container-engine
+check-container-engine:
+	@if [ -z "$(CONTAINER_ENGINE)" ]; then \
+		echo "Error: No container engine found."; \
+		echo "Please install podman or docker, or set CONTAINER_ENGINE explicitly."; \
+		echo "  Example: make image-build CONTAINER_ENGINE=podman"; \
+		exit 1; \
+	fi
+	@echo "Using container engine: $(CONTAINER_ENGINE)"
+
 .PHONY: image-build
-image-build: ## Build container image
+image-build: check-container-engine ## Build container image
 	@echo "Building container image..."
 	@${CONTAINER_ENGINE} build -t $(IMAGE_NAME):$(IMAGE_TAG) .
 	@echo "Container image built: $(IMAGE_NAME):$(IMAGE_TAG)"
 
 .PHONY: image-run
-image-run: ## Run container
+image-run: check-container-engine ## Run container
 	@echo "Running container..."
-	@echo "Using kubeconfig: $(if $(KUBECONFIG),$(KUBECONFIG),~/.kube/config)"
+	@echo "Using kubeconfig: $(if $(KUBECONFIG),$(KUBECONFIG),$$HOME/.kube/config)"
 	@${CONTAINER_ENGINE} run -d --rm --name $(CONTAINER_NAME) -p 8082:8080 -p 8083:8081 \
 		$(if $(DCM_NETWORK),--network $(DCM_NETWORK),) \
-		-v "$(if $(KUBECONFIG),$(KUBECONFIG),~/.kube/config)":/home/appuser/.kube/config:ro \
+		-v "$(if $(KUBECONFIG),$(KUBECONFIG),$$HOME/.kube/config)":/home/appuser/.kube/config:ro \
 		$(IMAGE_NAME):$(IMAGE_TAG)
 
 .PHONY: image-stop
-image-stop: ## Stop container
+image-stop: check-container-engine ## Stop container
 	@echo "Stopping container..."
 	@${CONTAINER_ENGINE} stop $(CONTAINER_NAME)
 
