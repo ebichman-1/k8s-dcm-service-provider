@@ -16,10 +16,6 @@ CGO_ENABLED := 0
 
 CONTAINER_ENGINE ?= $(shell which podman 2>/dev/null || which docker)
 
-ifndef CONTAINER_ENGINE
-  $(error No container engine found. Install podman or docker, or set CONTAINER_ENGINE explicitly)
-endif
-
 # Container variables
 IMAGE_NAME := $(APP_NAME)
 IMAGE_TAG := $(VERSION)
