@@ -14,7 +14,7 @@ GOOS := $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 CGO_ENABLED := 0
 
-CONTAINER_ENGINE ?= $(shell which podman 2>/dev/null || which docker)
+CONTAINER_ENGINE ?= $(shell which podman 2>/dev/null || which docker 2>/dev/null)
 
 # Container variables
 IMAGE_NAME := $(APP_NAME)
