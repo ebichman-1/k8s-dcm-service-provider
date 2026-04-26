@@ -37,6 +37,7 @@ func (s *NamespaceService) GetNamespacesByLabels(ctx context.Context, labelSelec
 	namespaces := make([]models.Namespace, 0, len(namespaceInfos))
 	for _, nsInfo := range namespaceInfos {
 		namespace := models.Namespace{
+			Path:   models.BuildNamespacePath(nsInfo.Name),
 			Name:   nsInfo.Name,
 			Labels: nsInfo.Labels,
 		}
@@ -44,11 +45,10 @@ func (s *NamespaceService) GetNamespacesByLabels(ctx context.Context, labelSelec
 	}
 
 	response := &models.NamespaceResponse{
-		Namespaces: namespaces,
-		Count:      len(namespaces),
+		Results: namespaces,
 	}
 
-	s.logger.Info("Successfully returned namespaces", zap.Int("count", response.Count))
+	s.logger.Info("Successfully returned namespaces", zap.Int("count", len(namespaces)))
 	return response, nil
 }
 

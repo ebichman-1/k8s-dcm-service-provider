@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dcm-project/k8s-service-provider/internal/deployment/services"
 	"github.com/dcm-project/k8s-service-provider/internal/deployment/models"
+	"github.com/dcm-project/k8s-service-provider/internal/deployment/services"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -25,20 +25,20 @@ type MockDeploymentService struct {
 // Verify that MockDeploymentService implements DeploymentServiceInterface
 var _ services.DeploymentServiceInterface = (*MockDeploymentService)(nil)
 
-func (m *MockDeploymentService) CreateDeployment(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (m *MockDeploymentService) CreateDeployment(ctx context.Context, req *models.Deployment, id string) error {
 	args := m.Called(ctx, req, id)
 	return args.Error(0)
 }
 
-func (m *MockDeploymentService) GetDeploymentByID(ctx context.Context, id string) (*models.DeploymentResponse, error) {
+func (m *MockDeploymentService) GetDeploymentByID(ctx context.Context, id string) (*models.Deployment, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*models.DeploymentResponse), args.Error(1)
+	return args.Get(0).(*models.Deployment), args.Error(1)
 }
 
-func (m *MockDeploymentService) UpdateDeployment(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (m *MockDeploymentService) UpdateDeployment(ctx context.Context, req *models.Deployment, id string) error {
 	args := m.Called(ctx, req, id)
 	return args.Error(0)
 }
@@ -68,7 +68,7 @@ func TestCreateDeployment(t *testing.T) {
 	}{
 		{
 			name: "successful container creation",
-			requestBody: models.DeploymentRequest{
+			requestBody: models.Deployment{
 				Kind: models.DeploymentKindContainer,
 				Metadata: models.Metadata{
 					Name:      "test-app",
@@ -82,13 +82,13 @@ func TestCreateDeployment(t *testing.T) {
 				},
 			},
 			setupMock: func(m *MockDeploymentService) {
-				m.On("CreateDeployment", mock.Anything, mock.AnythingOfType("*models.DeploymentRequest"), mock.AnythingOfType("string")).Return(nil)
+				m.On("CreateDeployment", mock.Anything, mock.AnythingOfType("*models.Deployment"), mock.AnythingOfType("string")).Return(nil)
 			},
 			expectedStatus: http.StatusCreated,
 		},
 		{
 			name: "successful VM creation",
-			requestBody: models.DeploymentRequest{
+			requestBody: models.Deployment{
 				Kind: models.DeploymentKindVM,
 				Metadata: models.Metadata{
 					Name:      "test-vm",
@@ -103,7 +103,7 @@ func TestCreateDeployment(t *testing.T) {
 				},
 			},
 			setupMock: func(m *MockDeploymentService) {
-				m.On("CreateDeployment", mock.Anything, mock.AnythingOfType("*models.DeploymentRequest"), mock.AnythingOfType("string")).Return(nil)
+				m.On("CreateDeployment", mock.Anything, mock.AnythingOfType("*models.Deployment"), mock.AnythingOfType("string")).Return(nil)
 			},
 			expectedStatus: http.StatusCreated,
 		},
@@ -168,7 +168,8 @@ func TestGetDeployment(t *testing.T) {
 			name:         "successful get",
 			deploymentID: "test-id",
 			setupMock: func(m *MockDeploymentService) {
-				response := &models.DeploymentResponse{
+				response := &models.Deployment{
+					Path: "deployments/test-id",
 					ID:   "test-id",
 					Kind: models.DeploymentKindContainer,
 					Metadata: models.Metadata{
@@ -220,7 +221,7 @@ func TestGetDeployment(t *testing.T) {
 			// Create gin context
 			c, _ := gin.CreateTestContext(w)
 			c.Request = req
-			c.Params = []gin.Param{{Key: "id", Value: tt.deploymentID}}
+			c.Params = []gin.Param{{Key: "deployment", Value: tt.deploymentID}}
 
 			// Call handler
 			handler.GetDeployment(c)
@@ -261,8 +262,6 @@ func TestDeleteDeployment(t *testing.T) {
 			deploymentID: "test-id",
 			queryParams:  "",
 			setupMock: func(m *MockDeploymentService) {
-				// With new implementation, only DeleteDeployment is called
-				// The service handles the lookup internally
 				m.On("DeleteDeployment", mock.Anything, "test-id").Return(nil)
 			},
 			expectedStatus: http.StatusNoContent,
@@ -298,7 +297,7 @@ func TestDeleteDeployment(t *testing.T) {
 			// Create gin context
 			c, _ := gin.CreateTestContext(w)
 			c.Request = req
-			c.Params = []gin.Param{{Key: "id", Value: tt.deploymentID}}
+			c.Params = []gin.Param{{Key: "deployment", Value: tt.deploymentID}}
 
 			// Call handler
 			handler.DeleteDeployment(c)
@@ -326,24 +325,20 @@ func TestListDeployments(t *testing.T) {
 	}{
 		{
 			name:        "successful list",
-			queryParams: "?limit=10&offset=0",
+			queryParams: "?max_page_size=10",
 			setupMock: func(m *MockDeploymentService) {
 				response := &models.ListDeploymentsResponse{
-					Deployments: []models.DeploymentResponse{
+					Results: []models.Deployment{
 						{
+							Path: "deployments/test-1",
 							ID:   "test-1",
 							Kind: models.DeploymentKindContainer,
 						},
 						{
+							Path: "deployments/test-2",
 							ID:   "test-2",
 							Kind: models.DeploymentKindVM,
 						},
-					},
-					Pagination: models.Pagination{
-						Limit:   10,
-						Offset:  0,
-						Total:   2,
-						HasMore: false,
 					},
 				}
 				m.On("ListDeployments", mock.Anything, mock.AnythingOfType("*models.ListDeploymentsRequest")).Return(response, nil)
@@ -356,18 +351,12 @@ func TestListDeployments(t *testing.T) {
 			queryParams: "?kind=container&namespace=test",
 			setupMock: func(m *MockDeploymentService) {
 				response := &models.ListDeploymentsResponse{
-					Deployments: []models.DeploymentResponse{},
-					Pagination: models.Pagination{
-						Limit:   20,
-						Offset:  0,
-						Total:   0,
-						HasMore: false,
-					},
+					Results: []models.Deployment{},
 				}
 				m.On("ListDeployments", mock.Anything, mock.AnythingOfType("*models.ListDeploymentsRequest")).Return(response, nil)
 			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   "deployments",
+			expectedBody:   "results",
 		},
 	}
 

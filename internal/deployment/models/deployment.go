@@ -1,7 +1,9 @@
 package models
 
 import (
+	"encoding/base64"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -26,22 +28,16 @@ const (
 	LabelValueManagedBy = "k8s-service-provider"
 )
 
-// DeploymentRequest represents the request payload for creating/updating deployments
-type DeploymentRequest struct {
-	Kind     DeploymentKind `json:"kind" binding:"required,oneof=container vm"`
-	Metadata Metadata       `json:"metadata" binding:"required"`
-	Spec     interface{}    `json:"spec" binding:"required"`
-}
-
-// DeploymentResponse represents the response payload for deployments
-type DeploymentResponse struct {
-	ID        string            `json:"id"`
-	Kind      DeploymentKind    `json:"kind"`
-	Metadata  Metadata          `json:"metadata"`
-	Spec      interface{}       `json:"spec"`
-	Status    DeploymentStatus  `json:"status"`
-	CreatedAt time.Time         `json:"createdAt"`
-	UpdatedAt time.Time         `json:"updatedAt"`
+// Deployment represents the unified resource for creating, reading, updating deployments (AEP-compliant)
+type Deployment struct {
+	Path      string           `json:"path,omitempty"`
+	ID        string           `json:"id,omitempty"`
+	Kind      DeploymentKind   `json:"kind" binding:"required,oneof=container vm"`
+	Metadata  Metadata         `json:"metadata" binding:"required"`
+	Spec      interface{}      `json:"spec" binding:"required"`
+	Status    DeploymentStatus `json:"status,omitempty"`
+	CreatedAt time.Time        `json:"create_time,omitempty"`
+	UpdatedAt time.Time        `json:"update_time,omitempty"`
 }
 
 // Metadata represents common metadata for deployments
@@ -67,8 +63,8 @@ type ContainerConfig struct {
 
 // PortConfig represents port configuration
 type PortConfig struct {
-	ContainerPort int    `json:"containerPort" binding:"required,min=1,max=65535"`
-	ServicePort   int    `json:"servicePort,omitempty"`
+	ContainerPort int    `json:"container_port" binding:"required,min=1,max=65535"`
+	ServicePort   int    `json:"service_port,omitempty"`
 	Protocol      string `json:"protocol,omitempty"`
 }
 
@@ -94,15 +90,15 @@ type VMConfig struct {
 	Ram          int     `json:"ram" binding:"required,min=1,max=32"`
 	Cpu          int     `json:"cpu" binding:"required,min=1,max=32"`
 	Os           string  `json:"os" binding:"required"`
-	SshPublicKey *string `json:"sshPublicKey,omitempty"` // Optional: SSH public key content
-	SshKeyName   *string `json:"sshKeyName,omitempty"`   // Optional: Secret name
+	SshPublicKey *string `json:"ssh_public_key,omitempty"`
+	SshKeyName   *string `json:"ssh_key_name,omitempty"`
 }
 
 // DeploymentStatus represents the status of a deployment
 type DeploymentStatus struct {
 	Phase         DeploymentPhase `json:"phase"`
 	Message       string          `json:"message,omitempty"`
-	ReadyReplicas int             `json:"readyReplicas,omitempty"`
+	ReadyReplicas int             `json:"ready_replicas,omitempty"`
 	Conditions    []Condition     `json:"conditions,omitempty"`
 }
 
@@ -121,45 +117,60 @@ const (
 type Condition struct {
 	Type               string    `json:"type"`
 	Status             string    `json:"status"`
-	LastTransitionTime time.Time `json:"lastTransitionTime"`
+	LastTransitionTime time.Time `json:"last_transition_time"`
 	Reason             string    `json:"reason,omitempty"`
 	Message            string    `json:"message,omitempty"`
 }
 
-// ListDeploymentsRequest represents the request for listing deployments
+// ListDeploymentsRequest represents the request for listing deployments (AEP-0132 token-based pagination)
 type ListDeploymentsRequest struct {
-	Namespace string         `form:"namespace"`
-	Kind      DeploymentKind `form:"kind"`
-	Limit     int            `form:"limit,default=20" binding:"min=1,max=100"`
-	Offset    int            `form:"offset,default=0" binding:"min=0"`
+	Namespace   string         `form:"namespace"`
+	Kind        DeploymentKind `form:"kind"`
+	MaxPageSize int            `form:"max_page_size,default=20" binding:"min=0,max=100"`
+	PageToken   string         `form:"page_token"`
 }
 
-// ListDeploymentsResponse represents the response for listing deployments
+// ListDeploymentsResponse represents the response for listing deployments (AEP-0132)
 type ListDeploymentsResponse struct {
-	Deployments []DeploymentResponse `json:"deployments"`
-	Pagination  Pagination           `json:"pagination"`
-}
-
-// Pagination represents pagination information
-type Pagination struct {
-	Limit   int  `json:"limit"`
-	Offset  int  `json:"offset"`
-	Total   int  `json:"total"`
-	HasMore bool `json:"hasMore"`
+	Results       []Deployment `json:"results"`
+	NextPageToken string       `json:"next_page_token,omitempty"`
 }
 
 // HealthResponse represents the health check response
 type HealthResponse struct {
 	Status    string    `json:"status"`
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp time.Time `json:"check_time"`
 }
 
 // ErrorResponse represents an error response
 type ErrorResponse struct {
+	Type      string    `json:"type,omitempty"`
 	Code      string    `json:"code"`
 	Message   string    `json:"message"`
 	Details   string    `json:"details,omitempty"`
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp time.Time `json:"error_time"`
+}
+
+// BuildResourcePath returns the AEP-compliant resource path for a deployment
+func BuildResourcePath(id string) string {
+	return fmt.Sprintf("deployments/%s", id)
+}
+
+// EncodePageToken encodes an offset into an opaque page token
+func EncodePageToken(offset int) string {
+	return base64.StdEncoding.EncodeToString([]byte(strconv.Itoa(offset)))
+}
+
+// DecodePageToken decodes a page token back into an offset
+func DecodePageToken(token string) (int, error) {
+	if token == "" {
+		return 0, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return 0, fmt.Errorf("invalid page token")
+	}
+	return strconv.Atoi(string(decoded))
 }
 
 // BuildDeploymentSelector creates a label selector for a specific deployment ID

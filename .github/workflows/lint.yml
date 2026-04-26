@@ -25,6 +25,24 @@ jobs:
       - name: Run pre-commit hooks
         run: pre-commit run --all-files
 
+  api-lint:
+    name: AEP OpenAPI Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Spectral AEP linter
+        run: npx --yes @stoplight/spectral-cli lint api/openapi.yaml api/namespace-openapi.yaml --ruleset .spectral.yaml
+
   security:
     name: Security Scan
     runs-on: ubuntu-latest

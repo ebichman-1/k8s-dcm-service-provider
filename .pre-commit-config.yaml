@@ -21,3 +21,10 @@ repos:
       - id: check-yaml
       - id: trailing-whitespace
       - id: end-of-file-fixer
+  - repo: local
+    hooks:
+      - id: spectral-lint
+        name: AEP Spectral OpenAPI Lint
+        entry: npx --yes @stoplight/spectral-cli lint --ruleset .spectral.yaml
+        language: system
+        files: ^api/.*\.(yaml|yml)$

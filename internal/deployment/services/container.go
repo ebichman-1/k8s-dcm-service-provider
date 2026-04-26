@@ -30,7 +30,7 @@ func NewContainerService(client kubernetes.Interface, logger *zap.Logger) *Conta
 }
 
 // CreateContainer creates a new container deployment
-func (c *ContainerService) CreateContainer(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (c *ContainerService) CreateContainer(ctx context.Context, req *models.Deployment, id string) error {
 	logger := c.logger.Named("container_service").With(zap.String("deployment_id", id))
 	logger.Info("Starting container deployment")
 
@@ -66,7 +66,7 @@ func (c *ContainerService) CreateContainer(ctx context.Context, req *models.Depl
 }
 
 // GetContainer retrieves container deployment information searching across all namespaces
-func (c *ContainerService) GetContainer(ctx context.Context, id string) (*models.DeploymentResponse, error) {
+func (c *ContainerService) GetContainer(ctx context.Context, id string) (*models.Deployment, error) {
 	logger := c.logger.Named("container_service").With(zap.String("deployment_id", id))
 
 	// Search across all namespaces using label selector
@@ -83,8 +83,8 @@ func (c *ContainerService) GetContainer(ctx context.Context, id string) (*models
 
 	deployment := deployments.Items[0]
 
-	// Convert Kubernetes deployment to our response model
-	response := &models.DeploymentResponse{
+	response := &models.Deployment{
+		Path: models.BuildResourcePath(id),
 		ID:   id,
 		Kind: models.DeploymentKindContainer,
 		Metadata: models.Metadata{
@@ -105,7 +105,7 @@ func (c *ContainerService) GetContainer(ctx context.Context, id string) (*models
 }
 
 // UpdateContainer updates an existing container deployment
-func (c *ContainerService) UpdateContainer(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (c *ContainerService) UpdateContainer(ctx context.Context, req *models.Deployment, id string) error {
 	logger := c.logger.Named("container_service").With(zap.String("deployment_id", id))
 	logger.Info("Updating container deployment")
 
@@ -160,11 +160,9 @@ func (c *ContainerService) DeleteContainer(ctx context.Context, id, namespace st
 }
 
 // ListContainers lists all container deployments
-func (c *ContainerService) ListContainers(ctx context.Context, namespace string, limit, offset int) ([]models.DeploymentResponse, error) {
+func (c *ContainerService) ListContainers(ctx context.Context, namespace string) ([]models.Deployment, error) {
 	logger := c.logger.Named("container_service")
 
-	// Use empty string to search all namespaces if namespace is not specified
-	// Filter only resources managed by this service
 	deployments, err := c.client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: models.BuildManagedResourceSelector(),
 	})
@@ -172,17 +170,12 @@ func (c *ContainerService) ListContainers(ctx context.Context, namespace string,
 		return nil, fmt.Errorf("failed to list deployments: %w", err)
 	}
 
-	var responses []models.DeploymentResponse
-	for i, deployment := range deployments.Items {
-		if i < offset {
-			continue
-		}
-		if len(responses) >= limit {
-			break
-		}
-
-		response := models.DeploymentResponse{
-			ID:   deployment.Labels[models.LabelAppID],
+	var responses []models.Deployment
+	for _, deployment := range deployments.Items {
+		appID := deployment.Labels[models.LabelAppID]
+		response := models.Deployment{
+			Path: models.BuildResourcePath(appID),
+			ID:   appID,
 			Kind: models.DeploymentKindContainer,
 			Metadata: models.Metadata{
 				Name:      deployment.Name,
@@ -202,7 +195,6 @@ func (c *ContainerService) ListContainers(ctx context.Context, namespace string,
 	logger.Info("Successfully listed container deployments", zap.Int("count", len(responses)))
 	return responses, nil
 }
-
 
 // ensureNamespace creates namespace if it doesn't exist
 func (c *ContainerService) ensureNamespace(ctx context.Context, namespace string) error {

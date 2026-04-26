@@ -158,8 +158,18 @@ sec: ## Run security scanner
 		echo "gosec not installed. Install with: go install github.com/securego/gosec/v2/cmd/gosec@latest"; \
 	fi
 
+.PHONY: check-aep
+check-aep: ## Run AEP Spectral linting on OpenAPI specs
+	@echo "Running AEP Spectral linter on OpenAPI specs..."
+	@if command -v npx >/dev/null 2>&1; then \
+		npx --yes @stoplight/spectral-cli lint api/openapi.yaml api/namespace-openapi.yaml --ruleset .spectral.yaml; \
+	else \
+		echo "npx not found. Install Node.js 20+ to run Spectral."; \
+		exit 1; \
+	fi
+
 .PHONY: check
-check: fmt vet lint sec test ## Run all code quality checks
+check: fmt vet lint lint-api sec test ## Run all code quality checks
 
 ##@ Documentation
 .PHONY: docs
@@ -232,6 +242,7 @@ install-tools: ## Install development tools
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
 	go install github.com/go-swagger/go-swagger/cmd/swagger@latest
+	@echo "Note: Node.js 20+ required for AEP linting (npx @stoplight/spectral-cli)"
 
 .PHONY: info
 info: ## Show build information

@@ -43,7 +43,7 @@ func NewVMService(k8sClient kubernetes.Interface, logger *zap.Logger) *VMService
 }
 
 // CreateVM creates a new virtual machine deployment using KubeVirt
-func (v *VMService) CreateVM(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (v *VMService) CreateVM(ctx context.Context, req *models.Deployment, id string) error {
 	logger := v.logger.Named("vm_service").With(zap.String("deployment_id", id))
 	logger.Info("Starting VM deployment")
 
@@ -196,7 +196,7 @@ func (v *VMService) CreateVM(ctx context.Context, req *models.DeploymentRequest,
 }
 
 // GetVM retrieves VM deployment information
-func (v *VMService) GetVM(ctx context.Context, id string) (*models.DeploymentResponse, error) {
+func (v *VMService) GetVM(ctx context.Context, id string) (*models.Deployment, error) {
 	logger := v.logger.Named("vm_service").With(zap.String("deployment_id", id))
 
 	// Search across all namespaces using label selector
@@ -213,8 +213,8 @@ func (v *VMService) GetVM(ctx context.Context, id string) (*models.DeploymentRes
 
 	vm := vms.Items[0]
 
-	// Convert VirtualMachine to our response model
-	response := &models.DeploymentResponse{
+	response := &models.Deployment{
+		Path: models.BuildResourcePath(id),
 		ID:   id,
 		Kind: models.DeploymentKindVM,
 		Metadata: models.Metadata{
@@ -234,7 +234,7 @@ func (v *VMService) GetVM(ctx context.Context, id string) (*models.DeploymentRes
 }
 
 // UpdateVM updates an existing VM deployment
-func (v *VMService) UpdateVM(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (v *VMService) UpdateVM(ctx context.Context, req *models.Deployment, id string) error {
 	logger := v.logger.Named("vm_service").With(zap.String("deployment_id", id))
 	logger.Info("Updating VM deployment")
 
@@ -294,11 +294,9 @@ func (v *VMService) DeleteVM(ctx context.Context, id, namespace string) error {
 }
 
 // ListVMs lists all VM deployments
-func (v *VMService) ListVMs(ctx context.Context, namespace string, limit, offset int) ([]models.DeploymentResponse, error) {
+func (v *VMService) ListVMs(ctx context.Context, namespace string) ([]models.Deployment, error) {
 	logger := v.logger.Named("vm_service")
 
-	// Use empty string to search all namespaces if namespace is not specified
-	// Filter only resources managed by this service
 	vms, err := v.kubevirtClient.VirtualMachine(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: models.BuildManagedResourceSelector(),
 	})
@@ -306,19 +304,12 @@ func (v *VMService) ListVMs(ctx context.Context, namespace string, limit, offset
 		return nil, fmt.Errorf("failed to list virtual machines: %w", err)
 	}
 
-	var responses []models.DeploymentResponse
-	for i, vm := range vms.Items {
-		if i < offset {
-			continue
-		}
-		if len(responses) >= limit {
-			break
-		}
-
+	var responses []models.Deployment
+	for _, vm := range vms.Items {
 		appID := vm.Labels[models.LabelAppID]
-		// This should always exist since we filter by managed-by, but keeping as safety check
 
-		response := models.DeploymentResponse{
+		response := models.Deployment{
+			Path: models.BuildResourcePath(appID),
 			ID:   appID,
 			Kind: models.DeploymentKindVM,
 			Metadata: models.Metadata{
@@ -481,7 +472,6 @@ func (v *VMService) ensureSSHKeySecret(ctx context.Context, namespace string, vm
 	// Return true for wasCreated only if we used a random name
 	return secretName, useRandomName, nil
 }
-
 
 // ensureNamespace creates namespace if it doesn't exist
 func (v *VMService) ensureNamespace(ctx context.Context, namespace string) error {

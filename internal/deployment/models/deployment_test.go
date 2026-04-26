@@ -9,15 +9,15 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func TestDeploymentRequest_JSON(t *testing.T) {
+func TestDeployment_JSON(t *testing.T) {
 	tests := []struct {
 		name     string
-		request  DeploymentRequest
+		request  Deployment
 		wantJSON string
 	}{
 		{
-			name: "container deployment request",
-			request: DeploymentRequest{
+			name: "container deployment",
+			request: Deployment{
 				Kind: DeploymentKindContainer,
 				Metadata: Metadata{
 					Name:      "test-app",
@@ -45,11 +45,11 @@ func TestDeploymentRequest_JSON(t *testing.T) {
 					},
 				},
 			},
-			wantJSON: `{"kind":"container","metadata":{"name":"test-app","namespace":"default","labels":{"app":"test","version":"1.0"}},"spec":{"container":{"image":"nginx:latest","replicas":2,"ports":[{"containerPort":80,"servicePort":8080,"protocol":"TCP"}],"resources":{"cpu":"100m","memory":"128Mi"}}}}`,
+			wantJSON: `{"kind":"container","metadata":{"name":"test-app","namespace":"default","labels":{"app":"test","version":"1.0"}},"spec":{"container":{"image":"nginx:latest","replicas":2,"ports":[{"container_port":80,"service_port":8080,"protocol":"TCP"}],"resources":{"cpu":"100m","memory":"128Mi"}}},"status":{"phase":""},"create_time":"0001-01-01T00:00:00Z","update_time":"0001-01-01T00:00:00Z"}`,
 		},
 		{
-			name: "VM deployment request",
-			request: DeploymentRequest{
+			name: "VM deployment",
+			request: Deployment{
 				Kind: DeploymentKindVM,
 				Metadata: Metadata{
 					Name:      "test-vm",
@@ -63,7 +63,7 @@ func TestDeploymentRequest_JSON(t *testing.T) {
 					},
 				},
 			},
-			wantJSON: `{"kind":"vm","metadata":{"name":"test-vm","namespace":"default"},"spec":{"vm":{"ram":4,"cpu":2,"os":"fedora"}}}`,
+			wantJSON: `{"kind":"vm","metadata":{"name":"test-vm","namespace":"default"},"spec":{"vm":{"ram":4,"cpu":2,"os":"fedora"}},"status":{"phase":""},"create_time":"0001-01-01T00:00:00Z","update_time":"0001-01-01T00:00:00Z"}`,
 		},
 	}
 
@@ -75,18 +75,19 @@ func TestDeploymentRequest_JSON(t *testing.T) {
 			assert.JSONEq(t, tt.wantJSON, string(gotJSON))
 
 			// Test unmarshaling
-			var gotRequest DeploymentRequest
-			err = json.Unmarshal([]byte(tt.wantJSON), &gotRequest)
+			var gotDeployment Deployment
+			err = json.Unmarshal([]byte(tt.wantJSON), &gotDeployment)
 			assert.NoError(t, err)
-			assert.Equal(t, tt.request.Kind, gotRequest.Kind)
-			assert.Equal(t, tt.request.Metadata, gotRequest.Metadata)
+			assert.Equal(t, tt.request.Kind, gotDeployment.Kind)
+			assert.Equal(t, tt.request.Metadata, gotDeployment.Metadata)
 		})
 	}
 }
 
-func TestDeploymentResponse_JSON(t *testing.T) {
+func TestDeployment_FullResource_JSON(t *testing.T) {
 	now := time.Now()
-	response := DeploymentResponse{
+	deployment := Deployment{
+		Path: "deployments/test-id-123",
 		ID:   "test-id-123",
 		Kind: DeploymentKindContainer,
 		Metadata: Metadata{
@@ -121,19 +122,25 @@ func TestDeploymentResponse_JSON(t *testing.T) {
 	}
 
 	// Test marshaling
-	jsonData, err := json.Marshal(response)
+	jsonData, err := json.Marshal(deployment)
 	assert.NoError(t, err)
 	assert.Contains(t, string(jsonData), "test-id-123")
 	assert.Contains(t, string(jsonData), "container")
 	assert.Contains(t, string(jsonData), "running")
+	assert.Contains(t, string(jsonData), "deployments/test-id-123")
+	assert.Contains(t, string(jsonData), "create_time")
+	assert.Contains(t, string(jsonData), "update_time")
+	assert.Contains(t, string(jsonData), "ready_replicas")
+	assert.Contains(t, string(jsonData), "last_transition_time")
 
 	// Test unmarshaling
-	var unmarshaled DeploymentResponse
+	var unmarshaled Deployment
 	err = json.Unmarshal(jsonData, &unmarshaled)
 	assert.NoError(t, err)
-	assert.Equal(t, response.ID, unmarshaled.ID)
-	assert.Equal(t, response.Kind, unmarshaled.Kind)
-	assert.Equal(t, response.Status.Phase, unmarshaled.Status.Phase)
+	assert.Equal(t, deployment.ID, unmarshaled.ID)
+	assert.Equal(t, deployment.Path, unmarshaled.Path)
+	assert.Equal(t, deployment.Kind, unmarshaled.Kind)
+	assert.Equal(t, deployment.Status.Phase, unmarshaled.Status.Phase)
 }
 
 func TestListDeploymentsRequest_Validation(t *testing.T) {
@@ -145,51 +152,38 @@ func TestListDeploymentsRequest_Validation(t *testing.T) {
 		{
 			name: "valid request with defaults",
 			request: ListDeploymentsRequest{
-				Limit:  20,
-				Offset: 0,
+				MaxPageSize: 20,
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid request with filters",
 			request: ListDeploymentsRequest{
-				Namespace: "test",
-				Kind:      DeploymentKindContainer,
-				Limit:     10,
-				Offset:    5,
+				Namespace:   "test",
+				Kind:        DeploymentKindContainer,
+				MaxPageSize: 10,
+				PageToken:   "",
 			},
 			wantErr: false,
 		},
 		{
-			name: "invalid limit too high",
+			name: "invalid max_page_size too high",
 			request: ListDeploymentsRequest{
-				Limit:  200,
-				Offset: 0,
+				MaxPageSize: 200,
 			},
 			wantErr: true,
 		},
 		{
-			name: "invalid limit zero",
+			name: "valid zero max_page_size (uses default)",
 			request: ListDeploymentsRequest{
-				Limit:  0,
-				Offset: 0,
+				MaxPageSize: 0,
 			},
-			wantErr: true,
-		},
-		{
-			name: "invalid negative offset",
-			request: ListDeploymentsRequest{
-				Limit:  20,
-				Offset: -1,
-			},
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// In a real implementation, you would have validation functions
-			// For now, we just test that the struct can be created
 			assert.NotNil(t, tt.request)
 
 			// Test JSON marshaling/unmarshaling
@@ -199,8 +193,8 @@ func TestListDeploymentsRequest_Validation(t *testing.T) {
 			var unmarshaled ListDeploymentsRequest
 			err = json.Unmarshal(jsonData, &unmarshaled)
 			assert.NoError(t, err)
-			assert.Equal(t, tt.request.Limit, unmarshaled.Limit)
-			assert.Equal(t, tt.request.Offset, unmarshaled.Offset)
+			assert.Equal(t, tt.request.MaxPageSize, unmarshaled.MaxPageSize)
+			assert.Equal(t, tt.request.PageToken, unmarshaled.PageToken)
 		})
 	}
 }
@@ -295,7 +289,6 @@ func TestMetadata_Validation(t *testing.T) {
 			assert.Equal(t, tt.metadata.Name, unmarshaled.Name)
 			assert.Equal(t, tt.metadata.Namespace, unmarshaled.Namespace)
 
-			// In a real implementation, you would validate DNS-1123 format
 			if !tt.valid && tt.metadata.Name == "" {
 				assert.Empty(t, tt.metadata.Name)
 			}
@@ -344,4 +337,47 @@ func TestHealthResponse_JSON(t *testing.T) {
 	err = json.Unmarshal(jsonData, &unmarshaled)
 	assert.NoError(t, err)
 	assert.Equal(t, healthResp.Status, unmarshaled.Status)
+}
+
+func TestBuildResourcePath(t *testing.T) {
+	tests := []struct {
+		id   string
+		want string
+	}{
+		{"abc123", "deployments/abc123"},
+		{"test-id", "deployments/test-id"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			assert.Equal(t, tt.want, BuildResourcePath(tt.id))
+		})
+	}
+}
+
+func TestPageToken(t *testing.T) {
+	tests := []struct {
+		offset int
+	}{
+		{0},
+		{10},
+		{50},
+		{100},
+	}
+
+	for _, tt := range tests {
+		token := EncodePageToken(tt.offset)
+		decoded, err := DecodePageToken(token)
+		assert.NoError(t, err)
+		assert.Equal(t, tt.offset, decoded)
+	}
+
+	// Test empty token
+	decoded, err := DecodePageToken("")
+	assert.NoError(t, err)
+	assert.Equal(t, 0, decoded)
+
+	// Test invalid token
+	_, err = DecodePageToken("invalid-token")
+	assert.Error(t, err)
 }

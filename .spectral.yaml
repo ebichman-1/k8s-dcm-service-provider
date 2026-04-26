@@ -1,0 +1,19 @@
+extends:
+  - https://raw.githubusercontent.com/aep-dev/aep-openapi-linter/refs/tags/v0.5.1/spectral.yaml
+
+overrides:
+  - files:
+      - "api/openapi.yaml#/paths/~1health"
+      - "api/namespace-openapi.yaml#/paths/~1health"
+    rules:
+      aep-132-http-body: "off"
+      aep-132-operation-id: "off"
+      aep-132-param-types: "off"
+      aep-132-required-params: "off"
+      aep-158-max-page-size-parameter: "off"
+      aep-158-page-token-parameter: "off"
+      aep-158-page-token-parameter-optional: "off"
+      aep-158-response-array-property: "off"
+      aep-158-response-next-page-token-property: "off"
+      aep-158-skip-parameter: "off"
+      aep-193-error-response-schema: "off"

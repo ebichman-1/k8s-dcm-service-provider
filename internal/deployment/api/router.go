@@ -28,14 +28,14 @@ func SetupRouter(deployService services.DeploymentServiceInterface, logger *zap.
 		// Health check
 		v1.GET("/health", handler.HealthCheck)
 
-		// Deployment routes
+		// Deployment routes (AEP-compliant: PATCH for update, :deployment path param)
 		deployments := v1.Group("/deployments")
 		{
 			deployments.POST("", handler.CreateDeployment)
 			deployments.GET("", handler.ListDeployments)
-			deployments.GET("/:id", handler.GetDeployment)
-			deployments.PUT("/:id", handler.UpdateDeployment)
-			deployments.DELETE("/:id", handler.DeleteDeployment)
+			deployments.GET("/:deployment", handler.GetDeployment)
+			deployments.PATCH("/:deployment", handler.UpdateDeployment)
+			deployments.DELETE("/:deployment", handler.DeleteDeployment)
 		}
 	}
 
@@ -48,7 +48,7 @@ func CORSMiddleware() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PATCH, DELETE")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)

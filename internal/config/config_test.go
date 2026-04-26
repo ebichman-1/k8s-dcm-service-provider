@@ -65,8 +65,8 @@ func TestLoadConfig(t *testing.T) {
 		{
 			name: "kubeconfig path set",
 			envVars: map[string]string{
-				"KUBECONFIG":    "/custom/kubeconfig",
-				"LOG_LEVEL":     "error",
+				"KUBECONFIG":      "/custom/kubeconfig",
+				"LOG_LEVEL":       "error",
 				"LOG_OUTPUT_PATH": "/var/log/app.log",
 			},
 			expected: &Config{

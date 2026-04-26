@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/dcm-project/k8s-service-provider/internal/deployment/api"
-	"github.com/dcm-project/k8s-service-provider/internal/deployment/services"
 	"github.com/dcm-project/k8s-service-provider/internal/deployment/models"
+	"github.com/dcm-project/k8s-service-provider/internal/deployment/services"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"k8s.io/utils/ptr"
@@ -29,7 +29,6 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 	suite.logger = zap.NewNop()
 
 	// Create mock deployment service
-	// In a real integration test, you might use test containers or in-memory implementations
 	mockDeployService := &MockDeploymentService{}
 
 	// Setup router
@@ -44,18 +43,19 @@ func (suite *IntegrationTestSuite) TearDownSuite() {
 
 // MockDeploymentService is a simple mock for integration testing
 type MockDeploymentService struct {
-	deployments map[string]*models.DeploymentResponse
+	deployments map[string]*models.Deployment
 }
 
 // Verify that MockDeploymentService implements DeploymentServiceInterface
 var _ services.DeploymentServiceInterface = (*MockDeploymentService)(nil)
 
-func (m *MockDeploymentService) CreateDeployment(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (m *MockDeploymentService) CreateDeployment(ctx context.Context, req *models.Deployment, id string) error {
 	if m.deployments == nil {
-		m.deployments = make(map[string]*models.DeploymentResponse)
+		m.deployments = make(map[string]*models.Deployment)
 	}
 
-	m.deployments[id] = &models.DeploymentResponse{
+	m.deployments[id] = &models.Deployment{
+		Path:     models.BuildResourcePath(id),
 		ID:       id,
 		Kind:     req.Kind,
 		Metadata: req.Metadata,
@@ -67,7 +67,7 @@ func (m *MockDeploymentService) CreateDeployment(ctx context.Context, req *model
 	return nil
 }
 
-func (m *MockDeploymentService) GetDeploymentByID(ctx context.Context, id string) (*models.DeploymentResponse, error) {
+func (m *MockDeploymentService) GetDeploymentByID(ctx context.Context, id string) (*models.Deployment, error) {
 	if m.deployments == nil {
 		return nil, models.NewErrDeploymentNotFound(id)
 	}
@@ -79,7 +79,7 @@ func (m *MockDeploymentService) GetDeploymentByID(ctx context.Context, id string
 	return deployment, nil
 }
 
-func (m *MockDeploymentService) UpdateDeployment(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (m *MockDeploymentService) UpdateDeployment(ctx context.Context, req *models.Deployment, id string) error {
 	if m.deployments == nil {
 		return models.NewErrDeploymentNotFound(id)
 	}
@@ -109,17 +109,11 @@ func (m *MockDeploymentService) DeleteDeployment(ctx context.Context, id string)
 func (m *MockDeploymentService) ListDeployments(ctx context.Context, req *models.ListDeploymentsRequest) (*models.ListDeploymentsResponse, error) {
 	if m.deployments == nil {
 		return &models.ListDeploymentsResponse{
-			Deployments: []models.DeploymentResponse{},
-			Pagination: models.Pagination{
-				Limit:   req.Limit,
-				Offset:  req.Offset,
-				Total:   0,
-				HasMore: false,
-			},
+			Results: []models.Deployment{},
 		}, nil
 	}
 
-	var deployments []models.DeploymentResponse
+	var results []models.Deployment
 	for _, deployment := range m.deployments {
 		// Apply filters
 		if req.Kind != "" && deployment.Kind != req.Kind {
@@ -128,31 +122,36 @@ func (m *MockDeploymentService) ListDeployments(ctx context.Context, req *models
 		if req.Namespace != "" && deployment.Metadata.Namespace != req.Namespace {
 			continue
 		}
-		deployments = append(deployments, *deployment)
+		results = append(results, *deployment)
+	}
+
+	// Decode page token for offset
+	offset, _ := models.DecodePageToken(req.PageToken)
+	pageSize := req.MaxPageSize
+	if pageSize <= 0 {
+		pageSize = 20
 	}
 
 	// Apply pagination
-	total := len(deployments)
-	start := req.Offset
-	end := start + req.Limit
+	total := len(results)
+	start := offset
+	end := start + pageSize
 
+	var nextPageToken string
 	if start >= total {
-		deployments = []models.DeploymentResponse{}
+		results = []models.Deployment{}
 	} else {
 		if end > total {
 			end = total
+		} else if end < total {
+			nextPageToken = models.EncodePageToken(end)
 		}
-		deployments = deployments[start:end]
+		results = results[start:end]
 	}
 
 	return &models.ListDeploymentsResponse{
-		Deployments: deployments,
-		Pagination: models.Pagination{
-			Limit:   req.Limit,
-			Offset:  req.Offset,
-			Total:   total,
-			HasMore: req.Offset+req.Limit < total,
-		},
+		Results:       results,
+		NextPageToken: nextPageToken,
 	}, nil
 }
 
@@ -169,7 +168,7 @@ func (suite *IntegrationTestSuite) TestHealthCheck() {
 
 func (suite *IntegrationTestSuite) TestContainerDeploymentLifecycle() {
 	// Test creating a container deployment
-	createReq := models.DeploymentRequest{
+	createReq := models.Deployment{
 		Kind: models.DeploymentKindContainer,
 		Metadata: models.Metadata{
 			Name:      "test-nginx",
@@ -198,11 +197,12 @@ func (suite *IntegrationTestSuite) TestContainerDeploymentLifecycle() {
 	suite.NoError(err)
 	suite.Equal(http.StatusCreated, resp.StatusCode)
 
-	var createResp models.DeploymentResponse
+	var createResp models.Deployment
 	err = json.NewDecoder(resp.Body).Decode(&createResp)
 	suite.NoError(err)
 	suite.Equal(models.DeploymentKindContainer, createResp.Kind)
 	suite.Equal("test-nginx", createResp.Metadata.Name)
+	suite.NotEmpty(createResp.Path)
 	deploymentID := createResp.ID
 
 	// Get deployment
@@ -210,13 +210,13 @@ func (suite *IntegrationTestSuite) TestContainerDeploymentLifecycle() {
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
 
-	var getResp models.DeploymentResponse
+	var getResp models.Deployment
 	err = json.NewDecoder(resp.Body).Decode(&getResp)
 	suite.NoError(err)
 	suite.Equal(deploymentID, getResp.ID)
 	suite.Equal(models.DeploymentKindContainer, getResp.Kind)
 
-	// Update deployment
+	// Update deployment (using PATCH)
 	updateReq := createReq
 	containerSpec := updateReq.Spec.(models.ContainerSpec)
 	containerSpec.Container.Replicas = ptr.To(3)
@@ -224,8 +224,8 @@ func (suite *IntegrationTestSuite) TestContainerDeploymentLifecycle() {
 	updateBody, _ := json.Marshal(updateReq)
 
 	client := &http.Client{}
-	req, _ := http.NewRequest("PUT", suite.router.URL+"/api/v1/deployments/"+deploymentID, bytes.NewBuffer(updateBody))
-	req.Header.Set("Content-Type", "application/json")
+	req, _ := http.NewRequest("PATCH", suite.router.URL+"/api/v1/deployments/"+deploymentID, bytes.NewBuffer(updateBody))
+	req.Header.Set("Content-Type", "application/merge-patch+json")
 	resp, err = client.Do(req)
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
@@ -238,10 +238,10 @@ func (suite *IntegrationTestSuite) TestContainerDeploymentLifecycle() {
 	var listResp models.ListDeploymentsResponse
 	err = json.NewDecoder(resp.Body).Decode(&listResp)
 	suite.NoError(err)
-	suite.True(len(listResp.Deployments) > 0)
+	suite.True(len(listResp.Results) > 0)
 
 	// Delete deployment
-	req, _ = http.NewRequest("DELETE", suite.router.URL+"/api/v1/deployments/"+deploymentID+"?kind=container", nil)
+	req, _ = http.NewRequest("DELETE", suite.router.URL+"/api/v1/deployments/"+deploymentID, nil)
 	resp, err = client.Do(req)
 	suite.NoError(err)
 	suite.Equal(http.StatusNoContent, resp.StatusCode)
@@ -254,7 +254,7 @@ func (suite *IntegrationTestSuite) TestContainerDeploymentLifecycle() {
 
 func (suite *IntegrationTestSuite) TestVMDeploymentLifecycle() {
 	// Test creating a VM deployment
-	createReq := models.DeploymentRequest{
+	createReq := models.Deployment{
 		Kind: models.DeploymentKindVM,
 		Metadata: models.Metadata{
 			Name:      "test-fedora-vm",
@@ -278,11 +278,12 @@ func (suite *IntegrationTestSuite) TestVMDeploymentLifecycle() {
 	suite.NoError(err)
 	suite.Equal(http.StatusCreated, resp.StatusCode)
 
-	var createResp models.DeploymentResponse
+	var createResp models.Deployment
 	err = json.NewDecoder(resp.Body).Decode(&createResp)
 	suite.NoError(err)
 	suite.Equal(models.DeploymentKindVM, createResp.Kind)
 	suite.Equal("test-fedora-vm", createResp.Metadata.Name)
+	suite.NotEmpty(createResp.Path)
 	deploymentID := createResp.ID
 
 	// Get deployment
@@ -292,7 +293,7 @@ func (suite *IntegrationTestSuite) TestVMDeploymentLifecycle() {
 
 	// Delete deployment
 	client := &http.Client{}
-	req, _ := http.NewRequest("DELETE", suite.router.URL+"/api/v1/deployments/"+deploymentID+"?kind=vm", nil)
+	req, _ := http.NewRequest("DELETE", suite.router.URL+"/api/v1/deployments/"+deploymentID, nil)
 	resp, err = client.Do(req)
 	suite.NoError(err)
 	suite.Equal(http.StatusNoContent, resp.StatusCode)
@@ -307,7 +308,7 @@ func (suite *IntegrationTestSuite) TestErrorHandling() {
 	// Test invalid endpoint
 	resp, err = http.Get(suite.router.URL + "/api/v1/invalid-endpoint")
 	suite.NoError(err)
-	suite.Equal(http.StatusNotFound, resp.StatusCode) // Router will return 404 for missing path
+	suite.Equal(http.StatusNotFound, resp.StatusCode)
 
 	// Test non-existent deployment
 	resp, err = http.Get(suite.router.URL + "/api/v1/deployments/non-existent-id")
@@ -317,7 +318,7 @@ func (suite *IntegrationTestSuite) TestErrorHandling() {
 
 func (suite *IntegrationTestSuite) TestListDeploymentsWithFilters() {
 	// Create a container deployment
-	containerReq := models.DeploymentRequest{
+	containerReq := models.Deployment{
 		Kind: models.DeploymentKindContainer,
 		Metadata: models.Metadata{
 			Name:      "test-container",
@@ -336,7 +337,7 @@ func (suite *IntegrationTestSuite) TestListDeploymentsWithFilters() {
 	suite.Equal(http.StatusCreated, resp.StatusCode)
 
 	// Create a VM deployment
-	vmReq := models.DeploymentRequest{
+	vmReq := models.Deployment{
 		Kind: models.DeploymentKindVM,
 		Metadata: models.Metadata{
 			Name:      "test-vm",
@@ -366,7 +367,7 @@ func (suite *IntegrationTestSuite) TestListDeploymentsWithFilters() {
 	suite.NoError(err)
 
 	// Should only return container deployments
-	for _, deployment := range listResp.Deployments {
+	for _, deployment := range listResp.Results {
 		suite.Equal(models.DeploymentKindContainer, deployment.Kind)
 	}
 }
@@ -378,6 +379,5 @@ func TestIntegrationSuite(t *testing.T) {
 
 // TestMain allows running tests with setup/teardown
 func TestMain(m *testing.M) {
-	// Run tests
 	m.Run()
 }

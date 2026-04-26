@@ -18,136 +18,168 @@ servers:
 
 paths:
   /namespaces:
-    post:
-      summary: Get namespaces by labels
+    get:
+      summary: List namespaces by labels
       description: Returns a list of Kubernetes namespaces that match the provided label selectors
-      operationId: getNamespacesByLabels
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LabelSelectors'
-            examples:
-              simple:
-                summary: Simple label selector
-                value:
-                  labels:
-                    environment: production
-                    team: backend
-              multiple:
-                summary: Multiple label selectors
-                value:
-                  labels:
-                    environment: staging
-                    app: web-service
-                    version: v1.2.3
+      operationId: ListNamespaces
+      parameters:
+        - name: filter
+          in: query
+          description: |
+            Label selector filter string. Comma-separated key=value pairs.
+            Example: environment=production,team=backend
+          schema:
+            type: string
+          examples:
+            simple:
+              summary: Simple label selector
+              value: "environment=production,team=backend"
+            multiple:
+              summary: Multiple label selectors
+              value: "environment=staging,app=web-service,version=v1.2.3"
+        - name: max_page_size
+          in: query
+          description: Maximum number of namespaces to return per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: page_token
+          in: query
+          description: Token for retrieving the next page of results
+          schema:
+            type: string
       responses:
         '200':
           description: Successfully retrieved namespaces
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NamespaceResponse'
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Namespace'
+                  next_page_token:
+                    type: string
+                    description: Token for the next page of results
               examples:
                 success:
                   summary: Successful response
                   value:
-                    namespaces:
-                      - name: production-backend
+                    results:
+                      - path: "namespaces/production-backend"
+                        name: production-backend
                         labels:
                           environment: production
                           team: backend
                           created-by: ops
-                      - name: prod-api
+                      - path: "namespaces/prod-api"
+                        name: prod-api
                         labels:
                           environment: production
                           team: backend
                           service: api
-                    count: 2
+                    next_page_token: ""
         '400':
           description: Bad request - invalid input
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/Error'
               examples:
                 invalid_labels:
                   summary: Invalid label format
                   value:
-                    error: "Validation Error"
+                    code: "INVALID_ARGUMENT"
                     message: "Labels cannot be empty"
         '500':
           description: Internal server error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/Error'
               examples:
                 k8s_error:
                   summary: Kubernetes API error
                   value:
-                    error: "Kubernetes API Error"
+                    code: "INTERNAL"
                     message: "Failed to fetch namespaces"
 
   /health:
     get:
       summary: Health check endpoint
       description: Returns the health status of the namespace service
-      operationId: healthCheck
+      operationId: HealthCheck
       responses:
         '200':
           description: Service is healthy
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HealthResponse'
+                type: object
+                required:
+                  - status
+                  - check_time
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, unhealthy]
+                  check_time:
+                    type: string
+                    format: date-time
               examples:
                 healthy:
                   summary: Healthy service
                   value:
                     status: "healthy"
-                    timestamp: "2024-01-15T10:30:00Z"
+                    check_time: "2024-01-15T10:30:00Z"
         '503':
           description: Service is unhealthy
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HealthResponse'
+                type: object
+                properties:
+                  type:
+                    type: string
+                    format: uri-reference
+                  status:
+                    type: string
+                    enum: [healthy, unhealthy]
+                  check_time:
+                    type: string
+                    format: date-time
+                  error:
+                    type: string
               examples:
                 unhealthy:
                   summary: Unhealthy service
                   value:
                     status: "unhealthy"
-                    timestamp: "2024-01-15T10:30:00Z"
+                    check_time: "2024-01-15T10:30:00Z"
                     error: "Cannot connect to Kubernetes cluster"
 
 components:
   schemas:
-    LabelSelectors:
-      type: object
-      required:
-        - labels
-      properties:
-        labels:
-          type: object
-          additionalProperties:
-            type: string
-          description: Key-value pairs representing label selectors
-          example:
-            environment: production
-            team: backend
-      example:
-        labels:
-          environment: production
-          team: backend
-
     Namespace:
       type: object
+      x-aep-resource:
+        type: "k8s-service-provider/namespace"
+        singular: "namespace"
+        plural: "namespaces"
+        patterns:
+          - "namespaces/{namespace}"
       required:
         - name
         - labels
       properties:
+        path:
+          type: string
+          readOnly: true
+          description: "Resource path. Format: namespaces/{namespace}"
+          example: "namespaces/production-backend"
         name:
           type: string
           description: The name of the namespace
@@ -162,51 +194,21 @@ components:
             team: backend
             created-by: ops
 
-    NamespaceResponse:
+    Error:
       type: object
       required:
-        - namespaces
-        - count
-      properties:
-        namespaces:
-          type: array
-          items:
-            $ref: '#/components/schemas/Namespace'
-          description: List of matching namespaces
-        count:
-          type: integer
-          description: Number of matching namespaces
-          example: 2
-
-    ErrorResponse:
-      type: object
-      required:
-        - error
+        - code
         - message
       properties:
-        error:
+        type:
           type: string
-          description: Error type or category
-          example: "Validation Error"
+          format: uri-reference
+          description: Error type identifier
+        code:
+          type: string
+          description: Error code
+          example: "INVALID_ARGUMENT"
         message:
           type: string
           description: Detailed error message
           example: "Labels cannot be empty"
-
-    HealthResponse:
-      type: object
-      required:
-        - status
-        - timestamp
-      properties:
-        status:
-          type: string
-          enum: [healthy, unhealthy]
-          description: Health status of the service
-        timestamp:
-          type: string
-          format: date-time
-          description: Timestamp of the health check
-        error:
-          type: string
-          description: Error message if status is unhealthy

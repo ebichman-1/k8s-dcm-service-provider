@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dcm-project/k8s-service-provider/internal/deployment/services"
 	"github.com/dcm-project/k8s-service-provider/internal/deployment/models"
+	"github.com/dcm-project/k8s-service-provider/internal/deployment/services"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -30,7 +30,7 @@ func NewHandler(deployService services.DeploymentServiceInterface, logger *zap.L
 func (h *Handler) CreateDeployment(c *gin.Context) {
 	logger := h.logger.Named("api_handler").With(zap.String("endpoint", "create_deployment"))
 
-	var req models.DeploymentRequest
+	var req models.Deployment
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error("Failed to bind request", zap.Error(err))
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -47,8 +47,11 @@ func (h *Handler) CreateDeployment(c *gin.Context) {
 		req.Metadata.Namespace = "default"
 	}
 
-	// Generate unique ID for the deployment
-	deploymentID := uuid.New().String()
+	// Accept optional client-provided ID (AEP-0133)
+	deploymentID := c.Query("id")
+	if deploymentID == "" {
+		deploymentID = uuid.New().String()
+	}
 
 	// Parse and validate the spec based on kind
 	if err := h.parseAndValidateSpec(&req); err != nil {
@@ -87,7 +90,8 @@ func (h *Handler) CreateDeployment(c *gin.Context) {
 	}
 
 	// Return the created deployment
-	response := models.DeploymentResponse{
+	response := models.Deployment{
+		Path:     models.BuildResourcePath(deploymentID),
 		ID:       deploymentID,
 		Kind:     req.Kind,
 		Metadata: req.Metadata,
@@ -103,11 +107,11 @@ func (h *Handler) CreateDeployment(c *gin.Context) {
 	c.JSON(http.StatusCreated, response)
 }
 
-// GetDeployment handles GET /deployments/{id}
+// GetDeployment handles GET /deployments/{deployment}
 func (h *Handler) GetDeployment(c *gin.Context) {
 	logger := h.logger.Named("api_handler").With(zap.String("endpoint", "get_deployment"))
 
-	deploymentID := c.Param("id")
+	deploymentID := c.Param("deployment")
 	if deploymentID == "" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Code:      "MISSING_ID",
@@ -157,11 +161,11 @@ func (h *Handler) GetDeployment(c *gin.Context) {
 	c.JSON(http.StatusOK, deployment)
 }
 
-// UpdateDeployment handles PUT /deployments/{id}
+// UpdateDeployment handles PATCH /deployments/{deployment}
 func (h *Handler) UpdateDeployment(c *gin.Context) {
 	logger := h.logger.Named("api_handler").With(zap.String("endpoint", "update_deployment"))
 
-	deploymentID := c.Param("id")
+	deploymentID := c.Param("deployment")
 	if deploymentID == "" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Code:      "MISSING_ID",
@@ -171,7 +175,7 @@ func (h *Handler) UpdateDeployment(c *gin.Context) {
 		return
 	}
 
-	var req models.DeploymentRequest
+	var req models.Deployment
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error("Failed to bind request", zap.Error(err))
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -213,7 +217,8 @@ func (h *Handler) UpdateDeployment(c *gin.Context) {
 	}
 
 	// Return the updated deployment
-	response := models.DeploymentResponse{
+	response := models.Deployment{
+		Path:     models.BuildResourcePath(deploymentID),
 		ID:       deploymentID,
 		Kind:     req.Kind,
 		Metadata: req.Metadata,
@@ -221,7 +226,7 @@ func (h *Handler) UpdateDeployment(c *gin.Context) {
 		Status: models.DeploymentStatus{
 			Phase: models.DeploymentPhasePending,
 		},
-		CreatedAt: time.Now(), // In a real implementation, preserve original creation time
+		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
@@ -229,11 +234,11 @@ func (h *Handler) UpdateDeployment(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// DeleteDeployment handles DELETE /deployments/{id}
+// DeleteDeployment handles DELETE /deployments/{deployment}
 func (h *Handler) DeleteDeployment(c *gin.Context) {
 	logger := h.logger.Named("api_handler").With(zap.String("endpoint", "delete_deployment"))
 
-	deploymentID := c.Param("id")
+	deploymentID := c.Param("deployment")
 	if deploymentID == "" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Code:      "MISSING_ID",
@@ -299,10 +304,9 @@ func (h *Handler) ListDeployments(c *gin.Context) {
 	}
 
 	// Set defaults
-	if req.Limit == 0 {
-		req.Limit = 20
+	if req.MaxPageSize == 0 {
+		req.MaxPageSize = 20
 	}
-	// Keep namespace empty if not specified - service will search all namespaces
 
 	response, err := h.deployService.ListDeployments(c.Request.Context(), &req)
 	if err != nil {
@@ -316,7 +320,7 @@ func (h *Handler) ListDeployments(c *gin.Context) {
 		return
 	}
 
-	logger.Info("Successfully listed deployments", zap.Int("count", len(response.Deployments)))
+	logger.Info("Successfully listed deployments", zap.Int("count", len(response.Results)))
 	c.JSON(http.StatusOK, response)
 }
 
@@ -330,7 +334,7 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 }
 
 // parseAndValidateSpec parses and validates the deployment specification
-func (h *Handler) parseAndValidateSpec(req *models.DeploymentRequest) error {
+func (h *Handler) parseAndValidateSpec(req *models.Deployment) error {
 	// Convert the spec interface{} to proper typed spec based on kind
 	specBytes, err := json.Marshal(req.Spec)
 	if err != nil {

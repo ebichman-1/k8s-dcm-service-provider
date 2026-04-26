@@ -16,9 +16,9 @@ func SetupRouter(handler *Handler, logger *zap.Logger) *mux.Router {
 	router.Use(loggingMiddleware(logger))
 	router.Use(corsMiddleware)
 
-	// API v1 routes
+	// API v1 routes (AEP-compliant: GET for list)
 	v1 := router.PathPrefix("/api/v1").Subrouter()
-	v1.HandleFunc("/namespaces", handler.GetNamespacesByLabels).Methods("POST")
+	v1.HandleFunc("/namespaces", handler.ListNamespaces).Methods("GET")
 	v1.HandleFunc("/health", handler.HealthCheck).Methods("GET")
 
 	// Handle 404 and 405 errors
@@ -70,7 +70,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		// Handle preflight requests

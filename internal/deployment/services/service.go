@@ -11,9 +11,9 @@ import (
 
 // DeploymentServiceInterface defines the interface for deployment operations
 type DeploymentServiceInterface interface {
-	CreateDeployment(ctx context.Context, req *models.DeploymentRequest, id string) error
-	GetDeploymentByID(ctx context.Context, id string) (*models.DeploymentResponse, error)
-	UpdateDeployment(ctx context.Context, req *models.DeploymentRequest, id string) error
+	CreateDeployment(ctx context.Context, req *models.Deployment, id string) error
+	GetDeploymentByID(ctx context.Context, id string) (*models.Deployment, error)
+	UpdateDeployment(ctx context.Context, req *models.Deployment, id string) error
 	DeleteDeployment(ctx context.Context, id string) error
 	ListDeployments(ctx context.Context, req *models.ListDeploymentsRequest) (*models.ListDeploymentsResponse, error)
 }
@@ -35,7 +35,7 @@ func NewDeploymentService(k8sClient k8s.ClientInterface, logger *zap.Logger) *De
 }
 
 // CreateDeployment creates a new deployment based on the kind
-func (d *DeploymentService) CreateDeployment(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (d *DeploymentService) CreateDeployment(ctx context.Context, req *models.Deployment, id string) error {
 	logger := d.logger.Named("deployment_service").With(
 		zap.String("kind", string(req.Kind)),
 		zap.String("name", req.Metadata.Name),
@@ -79,7 +79,7 @@ func (d *DeploymentService) CreateDeployment(ctx context.Context, req *models.De
 }
 
 // GetDeployment retrieves a deployment by ID and kind
-func (d *DeploymentService) GetDeployment(ctx context.Context, id, namespace string, kind models.DeploymentKind) (*models.DeploymentResponse, error) {
+func (d *DeploymentService) GetDeployment(ctx context.Context, id, namespace string, kind models.DeploymentKind) (*models.Deployment, error) {
 	logger := d.logger.Named("deployment_service").With(
 		zap.String("kind", string(kind)),
 		zap.String("deployment_id", id),
@@ -98,7 +98,7 @@ func (d *DeploymentService) GetDeployment(ctx context.Context, id, namespace str
 }
 
 // UpdateDeployment updates an existing deployment
-func (d *DeploymentService) UpdateDeployment(ctx context.Context, req *models.DeploymentRequest, id string) error {
+func (d *DeploymentService) UpdateDeployment(ctx context.Context, req *models.Deployment, id string) error {
 	logger := d.logger.Named("deployment_service").With(
 		zap.String("kind", string(req.Kind)),
 		zap.String("name", req.Metadata.Name),
@@ -140,22 +140,21 @@ func (d *DeploymentService) DeleteDeployment(ctx context.Context, id string) err
 	}
 }
 
-// ListDeployments lists deployments with filtering and pagination
+// ListDeployments lists deployments with filtering and token-based pagination (AEP-0132)
 func (d *DeploymentService) ListDeployments(ctx context.Context, req *models.ListDeploymentsRequest) (*models.ListDeploymentsResponse, error) {
 	logger := d.logger.Named("deployment_service").With(
 		zap.String("namespace", req.Namespace),
 		zap.String("kind", string(req.Kind)),
-		zap.Int("limit", req.Limit),
-		zap.Int("offset", req.Offset),
+		zap.Int("max_page_size", req.MaxPageSize),
 	)
 
 	logger.Info("Listing deployments")
 
-	var allDeployments []models.DeploymentResponse
+	var allDeployments []models.Deployment
 
 	// List containers if kind is empty or container
 	if req.Kind == "" || req.Kind == models.DeploymentKindContainer {
-		containers, err := d.containerService.ListContainers(ctx, req.Namespace, req.Limit, 0)
+		containers, err := d.containerService.ListContainers(ctx, req.Namespace)
 		if err != nil {
 			logger.Error("Failed to list containers", zap.Error(err))
 			return nil, fmt.Errorf("failed to list containers: %w", err)
@@ -165,7 +164,7 @@ func (d *DeploymentService) ListDeployments(ctx context.Context, req *models.Lis
 
 	// List VMs if kind is empty or vm
 	if req.Kind == "" || req.Kind == models.DeploymentKindVM {
-		vms, err := d.vmService.ListVMs(ctx, req.Namespace, req.Limit, 0)
+		vms, err := d.vmService.ListVMs(ctx, req.Namespace)
 		if err != nil {
 			logger.Error("Failed to list VMs", zap.Error(err))
 			return nil, fmt.Errorf("failed to list VMs: %w", err)
@@ -173,28 +172,37 @@ func (d *DeploymentService) ListDeployments(ctx context.Context, req *models.Lis
 		allDeployments = append(allDeployments, vms...)
 	}
 
+	// Decode page token to get offset
+	offset, err := models.DecodePageToken(req.PageToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid page token: %w", err)
+	}
+
+	pageSize := req.MaxPageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
 	// Apply pagination
 	total := len(allDeployments)
-	start := req.Offset
-	end := start + req.Limit
+	start := offset
+	end := start + pageSize
 
+	var nextPageToken string
 	if start >= total {
-		allDeployments = []models.DeploymentResponse{}
+		allDeployments = []models.Deployment{}
 	} else {
 		if end > total {
 			end = total
+		} else if end < total {
+			nextPageToken = models.EncodePageToken(end)
 		}
 		allDeployments = allDeployments[start:end]
 	}
 
 	response := &models.ListDeploymentsResponse{
-		Deployments: allDeployments,
-		Pagination: models.Pagination{
-			Limit:   req.Limit,
-			Offset:  req.Offset,
-			Total:   total,
-			HasMore: req.Offset+req.Limit < total,
-		},
+		Results:       allDeployments,
+		NextPageToken: nextPageToken,
 	}
 
 	logger.Info("Successfully listed deployments", zap.Int("count", len(allDeployments)))
@@ -202,10 +210,10 @@ func (d *DeploymentService) ListDeployments(ctx context.Context, req *models.Lis
 }
 
 // GetDeploymentByID retrieves a deployment by ID, searching both containers and VMs across all namespaces
-func (d *DeploymentService) GetDeploymentByID(ctx context.Context, id string) (*models.DeploymentResponse, error) {
+func (d *DeploymentService) GetDeploymentByID(ctx context.Context, id string) (*models.Deployment, error) {
 	logger := d.logger.Named("deployment_service").With(zap.String("deployment_id", id))
 
-	var foundDeployments []*models.DeploymentResponse
+	var foundDeployments []*models.Deployment
 
 	// Try to find as container
 	if deployment, err := d.containerService.GetContainer(ctx, id); err == nil {

@@ -21,13 +21,19 @@ paths:
     post:
       summary: Create a new deployment
       description: Creates a new container or virtual machine deployment
-      operationId: createDeployment
+      operationId: CreateDeployment
+      parameters:
+        - name: id
+          in: query
+          description: Optional client-provided deployment ID
+          schema:
+            type: string
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeploymentRequest'
+              $ref: '#/components/schemas/Deployment'
             examples:
               container:
                 summary: Container deployment example
@@ -44,8 +50,8 @@ paths:
                       image: nginx:latest
                       replicas: 3
                       ports:
-                        - containerPort: 80
-                          servicePort: 8080
+                        - container_port: 80
+                          service_port: 8080
                       resources:
                         cpu: 100m
                         memory: 128Mi
@@ -79,15 +85,15 @@ paths:
                       ram: 8
                       cpu: 4
                       os: ubuntu
-                      sshPublicKey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3F... user@hostname"
-                      sshKeyName: "ubuntu-vm-ssh-key"
+                      ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3F... user@hostname"
+                      ssh_key_name: "ubuntu-vm-ssh-key"
       responses:
         '201':
           description: Deployment created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeploymentResponse'
+                $ref: '#/components/schemas/Deployment'
         '400':
           description: Bad request
           content:
@@ -110,7 +116,7 @@ paths:
     get:
       summary: List all deployments
       description: Retrieves a list of all deployments
-      operationId: listDeployments
+      operationId: ListDeployments
       parameters:
         - name: namespace
           in: query
@@ -123,21 +129,18 @@ paths:
           schema:
             type: string
             enum: [container, vm]
-        - name: limit
+        - name: max_page_size
           in: query
-          description: Maximum number of deployments to return
+          description: Maximum number of deployments to return per page
           schema:
             type: integer
             minimum: 1
             maximum: 100
-            default: 20
-        - name: offset
+        - name: page_token
           in: query
-          description: Number of deployments to skip
+          description: Token for retrieving the next page of results
           schema:
-            type: integer
-            minimum: 0
-            default: 0
+            type: string
       responses:
         '200':
           description: List of deployments
@@ -146,12 +149,13 @@ paths:
               schema:
                 type: object
                 properties:
-                  deployments:
+                  results:
                     type: array
                     items:
-                      $ref: '#/components/schemas/DeploymentResponse'
-                  pagination:
-                    $ref: '#/components/schemas/Pagination'
+                      $ref: '#/components/schemas/Deployment'
+                  next_page_token:
+                    type: string
+                    description: Token for the next page of results
         '500':
           description: Internal server error
           content:
@@ -159,13 +163,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /deployments/{id}:
+  /deployments/{deployment}:
     get:
       summary: Get a deployment by ID
       description: Retrieves a specific deployment by its ID
-      operationId: getDeployment
+      operationId: GetDeployment
       parameters:
-        - name: id
+        - name: deployment
           in: path
           required: true
           description: Deployment ID
@@ -177,7 +181,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeploymentResponse'
+                $ref: '#/components/schemas/Deployment'
         '404':
           description: Deployment not found
           content:
@@ -191,12 +195,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-    put:
+    patch:
       summary: Update a deployment
-      description: Updates an existing deployment
-      operationId: updateDeployment
+      description: Updates an existing deployment using merge-patch semantics
+      operationId: UpdateDeployment
       parameters:
-        - name: id
+        - name: deployment
           in: path
           required: true
           description: Deployment ID
@@ -205,16 +209,16 @@ paths:
       requestBody:
         required: true
         content:
-          application/json:
+          application/merge-patch+json:
             schema:
-              $ref: '#/components/schemas/DeploymentRequest'
+              $ref: '#/components/schemas/Deployment'
       responses:
         '200':
           description: Deployment updated successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeploymentResponse'
+                $ref: '#/components/schemas/Deployment'
         '400':
           description: Bad request
           content:
@@ -237,9 +241,9 @@ paths:
     delete:
       summary: Delete a deployment
       description: Deletes a specific deployment
-      operationId: deleteDeployment
+      operationId: DeleteDeployment
       parameters:
-        - name: id
+        - name: deployment
           in: path
           required: true
           description: Deployment ID
@@ -265,7 +269,7 @@ paths:
     get:
       summary: Health check
       description: Returns the health status of the service
-      operationId: healthCheck
+      operationId: HealthCheck
       responses:
         '200':
           description: Service is healthy
@@ -277,19 +281,34 @@ paths:
                   status:
                     type: string
                     enum: [healthy]
-                  timestamp:
+                  check_time:
                     type: string
                     format: date-time
 
 components:
   schemas:
-    DeploymentRequest:
+    Deployment:
       type: object
+      x-aep-resource:
+        type: "k8s-service-provider/deployment"
+        singular: "deployment"
+        plural: "deployments"
+        patterns:
+          - "deployments/{deployment}"
       required:
         - kind
         - metadata
         - spec
       properties:
+        path:
+          type: string
+          readOnly: true
+          description: "Resource path. Format: deployments/{deployment}"
+          example: "deployments/abc123"
+        id:
+          type: string
+          readOnly: true
+          description: Unique deployment identifier
         kind:
           type: string
           enum: [container, vm]
@@ -305,30 +324,17 @@ components:
             mapping:
               container: '#/components/schemas/ContainerSpec'
               vm: '#/components/schemas/VMSpec'
-
-    DeploymentResponse:
-      type: object
-      properties:
-        id:
-          type: string
-          description: Unique deployment identifier
-        kind:
-          type: string
-          enum: [container, vm]
-        metadata:
-          $ref: '#/components/schemas/Metadata'
-        spec:
-          oneOf:
-            - $ref: '#/components/schemas/ContainerSpec'
-            - $ref: '#/components/schemas/VMSpec'
         status:
           $ref: '#/components/schemas/DeploymentStatus'
-        createdAt:
+          readOnly: true
+        create_time:
           type: string
           format: date-time
-        updatedAt:
+          readOnly: true
+        update_time:
           type: string
           format: date-time
+          readOnly: true
 
     Metadata:
       type: object
@@ -374,13 +380,13 @@ components:
               items:
                 type: object
                 required:
-                  - containerPort
+                  - container_port
                 properties:
-                  containerPort:
+                  container_port:
                     type: integer
                     minimum: 1
                     maximum: 65535
-                  servicePort:
+                  service_port:
                     type: integer
                     minimum: 1
                     maximum: 65535
@@ -438,24 +444,24 @@ components:
               type: string
               enum: [fedora, ubuntu, centos, rhel]
               description: Operating system for the VM
-            sshPublicKey:
+            ssh_public_key:
               type: string
               description: |
                 Optional SSH public key content to inject into the VM.
                 Must be a valid SSH public key (ssh-rsa, ssh-ed25519, ecdsa-sha2-*, or ssh-dss).
-                If provided without sshKeyName, a secret with a randomized name will be created.
-                If sshKeyName is provided and the secret exists, this field is ignored.
+                If provided without ssh_key_name, a secret with a randomized name will be created.
+                If ssh_key_name is provided and the secret exists, this field is ignored.
               example: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC..."
-            sshKeyName:
+            ssh_key_name:
               type: string
               pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
               maxLength: 253
               description: |
                 Optional name of the Kubernetes Secret to store/reference the SSH public key.
                 Must follow DNS-1123 subdomain rules (lowercase alphanumeric with hyphens).
-                If not provided and sshPublicKey is set, a randomized secret name will be generated.
-                If provided and the secret exists, it will be reused (sshPublicKey is ignored).
-                If provided and the secret doesn't exist, sshPublicKey must be provided to create it.
+                If not provided and ssh_public_key is set, a randomized secret name will be generated.
+                If provided and the secret exists, it will be reused (ssh_public_key is ignored).
+                If provided and the secret doesn't exist, ssh_public_key must be provided to create it.
               example: "my-vm-ssh-key"
 
     DeploymentStatus:
@@ -467,7 +473,7 @@ components:
         message:
           type: string
           description: Human-readable status message
-        readyReplicas:
+        ready_replicas:
           type: integer
           description: Number of ready replicas (for containers)
         conditions:
@@ -479,8 +485,8 @@ components:
                 type: string
               status:
                 type: string
-                enum: [True, False, Unknown]
-              lastTransitionTime:
+                enum: ['True', 'False', Unknown]
+              last_transition_time:
                 type: string
                 format: date-time
               reason:
@@ -488,24 +494,16 @@ components:
               message:
                 type: string
 
-    Pagination:
-      type: object
-      properties:
-        limit:
-          type: integer
-        offset:
-          type: integer
-        total:
-          type: integer
-        hasMore:
-          type: boolean
-
     Error:
       type: object
       required:
         - code
         - message
       properties:
+        type:
+          type: string
+          format: uri-reference
+          description: Error type identifier
         code:
           type: string
           description: Error code
@@ -515,7 +513,7 @@ components:
         details:
           type: string
           description: Additional error details
-        timestamp:
+        error_time:
           type: string
           format: date-time
 

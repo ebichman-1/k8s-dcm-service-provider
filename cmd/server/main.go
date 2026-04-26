@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dcm-project/k8s-service-provider/internal/deployment/api"
 	"github.com/dcm-project/k8s-service-provider/internal/config"
+	"github.com/dcm-project/k8s-service-provider/internal/deployment/api"
 	"github.com/dcm-project/k8s-service-provider/internal/deployment/services"
 	"github.com/dcm-project/k8s-service-provider/internal/k8s"
 	namespaceAPI "github.com/dcm-project/k8s-service-provider/internal/namespace/api"
